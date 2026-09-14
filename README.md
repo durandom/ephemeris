@@ -43,9 +43,11 @@ not written to disk.
   for hours.
 - Telemetry never fails the backup. Export errors are swallowed; flush has a
   short timeout on exit.
-- Inventory honours `SkipPaths` and the backup-exclude xattr, counts
-  `st_blocks * 512` (not apparent size), and reports `eperm` per area. No
-  local baseline; drift is a query in OpenObserve. A timestamp in
+- Inventory honours `SkipPaths` and the backup-exclude xattr on every file
+  and directory, counts `st_blocks * 512` (not apparent size), and reports
+  `eperm` per area. Its first total can be lower than `tm-inventory.py`:
+  that legacy script incorrectly counted individually xattr-excluded files.
+  No local baseline; drift is a query in OpenObserve. A timestamp in
   `~/.local/state/ephemeris/last_inventory` schedules the monthly walk.
 
 Outcomes: `success` | `failed` | `skipped_no_disk` | `already_running`.
