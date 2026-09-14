@@ -24,9 +24,11 @@ nor uploads a certificate or a Keychain profile anywhere.
    ```
 
 The script builds a `CGO_ENABLED=0` darwin/arm64 binary, applies the hardened
-runtime and a timestamped Developer ID signature, verifies the signature,
-checks Gatekeeper with `spctl`, and writes the archive plus its SHA-256 file
-under `dist/signed/`.
+runtime and a timestamped Developer ID signature, verifies the signature, and
+writes the archive plus its SHA-256 file under `dist/signed/`. It also checks
+that Gatekeeper reports the expected `Unnotarized Developer ID` status: a raw
+binary cannot be stapled, so that status is expected here rather than a release
+failure.
 
 The signing identity is intentionally not hard-coded: choose an identity that
 is already present in the local Keychain. Do not put a certificate, private

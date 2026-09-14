@@ -35,7 +35,22 @@ GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
 
 codesign --force --sign "$APPLE_SIGNING_IDENTITY" --options runtime --timestamp "$out/ephemeris"
 codesign --verify --strict --verbose=2 "$out/ephemeris"
-spctl --assess --type execute --verbose=4 "$out/ephemeris"
+
+# A raw executable cannot carry a stapled ticket. Gatekeeper therefore rejects
+# this deliberately unnotarized Developer ID build with this exact diagnosis;
+# codesign verification above is the release gate for the signed tarball.
+set +e
+assessment="$(spctl --assess --type execute --verbose=4 "$out/ephemeris" 2>&1)"
+assessment_status=$?
+set -e
+if [[ $assessment_status -eq 0 ]]; then
+  printf '%s\n' "$assessment"
+elif grep -q 'Unnotarized Developer ID' <<<"$assessment"; then
+  echo "Gatekeeper reports expected unnotarized Developer ID status"
+else
+  printf '%s\n' "$assessment" >&2
+  exit "$assessment_status"
+fi
 
 cp README.md LICENSE "$out/"
 tar -C dist/signed -czf "dist/signed/${name}.tar.gz" "$name"
