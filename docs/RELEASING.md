@@ -1,8 +1,9 @@
 # Releasing ephemeris
 
-The GitHub Actions release workflow creates unsigned darwin and Linux archives
-for every `v*` tag. It intentionally has no Apple credentials and must not be
-changed to add them casually.
+The GitHub Actions release workflow creates unsigned darwin/amd64 and Linux
+archives for every `v*` tag. It intentionally does **not** build darwin/arm64:
+that filename is reserved for the locally signed artifact below. It has no Apple
+credentials and must not be changed to add them casually.
 
 ## Local signed darwin/arm64 archive
 
@@ -30,6 +31,11 @@ that Gatekeeper reports the expected `Unnotarized Developer ID` status: a raw
 binary cannot be stapled, so that status is expected here rather than a release
 failure.
 
+After the workflow has created the release, upload this archive and its
+checksum file with `gh release upload <tag> ...`. Verify the uploaded archive's
+SHA-256 against the local checksum before pinning it in a consumer. Never
+upload an unsigned artifact under the darwin/arm64 filename.
+
 The signing identity is intentionally not hard-coded: choose an identity that
 is already present in the local Keychain. Do not put a certificate, private
 key, Apple ID, app-specific password, notary credential, or team secret in
@@ -41,6 +47,4 @@ This release path signs a raw command-line binary. Apple can notarize a raw
 binary, but it cannot staple a notarization ticket to one. Consequently this
 path provides no stapled, offline Gatekeeper proof. A notarized `.pkg` or a
 minimal `.app` wrapper is separate packaging work and is deliberately
-out-of-scope for now. Do not describe a locally signed tarball as notarized or
-publish it as a replacement for the unsigned GitHub Action artifact without a
-separate release decision.
+out-of-scope for now. Do not describe a locally signed tarball as notarized.

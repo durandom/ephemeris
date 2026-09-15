@@ -31,9 +31,10 @@ jobs:
           ldflags="-s -w -X main.version=${version} -X main.commit=${commit} -X main.date=${date}"
 
           mkdir -p dist
+          # darwin/arm64 is built and Developer-ID-signed locally. Publishing
+          # an unsigned CI archive under the same name would overwrite it.
           targets=(
             "darwin amd64"
-            "darwin arm64"
             "linux amd64"
             "linux arm64"
           )
