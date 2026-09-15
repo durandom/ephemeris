@@ -22,6 +22,20 @@ func TestNilSafe(t *testing.T) {
 	tel.Shutdown()
 }
 
+func TestLogsEndpoint(t *testing.T) {
+	for _, test := range []struct {
+		endpoint string
+		want     string
+	}{
+		{"http://otel.example.test:4318", "http://otel.example.test:4318/v1/logs"},
+		{"http://otel.example.test:4318/", "http://otel.example.test:4318/v1/logs"},
+	} {
+		if got := logsEndpoint(test.endpoint); got != test.want {
+			t.Errorf("logsEndpoint(%q) = %q, want %q", test.endpoint, got, test.want)
+		}
+	}
+}
+
 func TestSetupRoutesOTelErrorsToGenericLocalLog(t *testing.T) {
 	var messages []string
 	tel, err := Setup(context.Background(), Config{

@@ -13,12 +13,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
 )
 
 const destinationRole = "time_machine"
@@ -44,9 +41,7 @@ type RunRecord struct {
 
 // T is nil-safe. Export failures must never make a backup fail or stop.
 type T struct {
-	tp       *sdktrace.TracerProvider
 	lp       *sdklog.LoggerProvider
-	tracer   trace.Tracer
 	logger   otellog.Logger
 	flush    time.Duration
 	host     string
@@ -78,19 +73,8 @@ func Setup(ctx context.Context, cfg Config) (*T, error) {
 		attribute.String("service.version", controlledVersion(cfg.Version)),
 	)
 
-	traceExp, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(cfg.Endpoint))
+	logExp, err := otlploghttp.New(ctx, otlploghttp.WithEndpointURL(logsEndpoint(cfg.Endpoint)))
 	if err != nil {
-		logError(cfg.ErrorLog)
-		return &T{}, fmt.Errorf("otlp trace exporter: %w", err)
-	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExp),
-		sdktrace.WithResource(res),
-	)
-
-	logExp, err := otlploghttp.New(ctx, otlploghttp.WithEndpointURL(cfg.Endpoint))
-	if err != nil {
-		_ = tp.Shutdown(ctx)
 		logError(cfg.ErrorLog)
 		return &T{}, fmt.Errorf("otlp log exporter: %w", err)
 	}
@@ -101,9 +85,7 @@ func Setup(ctx context.Context, cfg Config) (*T, error) {
 
 	host, _ := os.Hostname()
 	return &T{
-		tp:       tp,
 		lp:       lp,
-		tracer:   tp.Tracer("github.com/durandom/ephemeris"),
 		logger:   lp.Logger("github.com/durandom/ephemeris"),
 		flush:    cfg.FlushTimeout,
 		host:     host,
@@ -134,15 +116,14 @@ func (t *T) Host() string {
 	return t.host
 }
 
-func (t *T) StartPhase(ctx context.Context, name string) (context.Context, func(rc int)) {
-	if t == nil || t.tracer == nil {
-		return ctx, func(int) {}
-	}
-	ctx, span := t.tracer.Start(ctx, name)
-	return ctx, func(rc int) {
-		span.SetAttributes(attribute.Int("rc", rc))
-		span.End()
-	}
+func (t *T) StartPhase(ctx context.Context, _ string) (context.Context, func(rc int)) {
+	// Backup telemetry is intentionally logs-only. Exporting traces without a
+	// trace pipeline turns successful phases into avoidable exporter errors.
+	return ctx, func(int) {}
+}
+
+func logsEndpoint(endpoint string) string {
+	return strings.TrimRight(endpoint, "/") + "/v1/logs"
 }
 
 func (t *T) EmitRun(ctx context.Context, rec RunRecord) {
@@ -171,21 +152,7 @@ func (t *T) EmitInventory(ctx context.Context, host string, area inventory.Area)
 }
 
 func (t *T) EmitProgress(ctx context.Context, host string, st timemachine.Status) {
-	if t == nil {
-		return
-	}
-	if span := trace.SpanFromContext(ctx); span.IsRecording() {
-		span.AddEvent("backup.progress", trace.WithAttributes(
-			attribute.String("phase", controlledPhase(st.Phase)),
-			attribute.Int64("files", st.Files),
-			attribute.Int64("total_files", st.TotalFiles),
-			attribute.Int64("bytes", st.Bytes),
-			attribute.Float64("percent", st.Percent),
-			attribute.Float64("raw_percent", st.RawPercent),
-			attribute.Float64("time_remaining_s", st.TimeRemaining),
-		))
-	}
-	if t.logger == nil {
+	if t == nil || t.logger == nil {
 		return
 	}
 	var r otellog.Record
@@ -329,11 +296,6 @@ func (t *T) Shutdown() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if t.tp != nil {
-		if err := t.tp.Shutdown(ctx); err != nil {
-			logError(t.errorLog)
-		}
-	}
 	if t.lp != nil {
 		if err := t.lp.Shutdown(ctx); err != nil {
 			logError(t.errorLog)
