@@ -19,6 +19,9 @@ func TestLoadMissingUsesDefaults(t *testing.T) {
 	if !cfg.OTel.Enabled {
 		t.Fatal("expected otel enabled by default")
 	}
+	if cfg.ScanEvery != 12*time.Hour {
+		t.Fatalf("scan every = %s", cfg.ScanEvery)
+	}
 	if cfg.ProgressInterval != DefaultProgressEvery {
 		t.Fatalf("progress = %s", cfg.ProgressInterval)
 	}
@@ -41,6 +44,7 @@ mac_exclude = "/bin/mac-exclude"
 scan_roots = ["/tmp/src"]
 state_dir = "/tmp/state"
 progress_interval = "10s"
+scan_every = "6h"
 inventory_every = "1h"
 tm_plist = "/tmp/tm.plist"
 
@@ -68,6 +72,9 @@ areas = ["/tmp/a", "~/src"]
 	if cfg.ProgressInterval != 10*time.Second {
 		t.Fatalf("progress = %s", cfg.ProgressInterval)
 	}
+	if cfg.ScanEvery != 6*time.Hour {
+		t.Fatalf("scan every = %s", cfg.ScanEvery)
+	}
 	if cfg.InventoryEvery != time.Hour {
 		t.Fatalf("inventory every = %s", cfg.InventoryEvery)
 	}
@@ -90,5 +97,22 @@ func TestExpandPath(t *testing.T) {
 	}
 	if got != filepath.Join(home, "foo") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestInvalidScanEvery(t *testing.T) {
+	_, err := parse(Default(), []byte(`scan_every = "12hours"`))
+	if err == nil {
+		t.Fatal("expected invalid scan_every error")
+	}
+}
+
+func TestExistingConfigUsesDefaultScanEvery(t *testing.T) {
+	cfg, err := parse(Default(), []byte(`inventory_every = "720h"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ScanEvery != 12*time.Hour {
+		t.Fatalf("scan every = %s", cfg.ScanEvery)
 	}
 }

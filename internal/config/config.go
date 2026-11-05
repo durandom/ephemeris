@@ -14,6 +14,7 @@ const (
 	appDir                = "ephemeris"
 	configFile            = "config.toml"
 	DefaultProgressEvery  = 60 * time.Second
+	DefaultScanEvery      = 12 * time.Hour
 	DefaultInventoryEvery = 30 * 24 * time.Hour
 	DefaultFlushTimeout   = 5 * time.Second
 	DefaultTMPlist        = "/Library/Preferences/com.apple.TimeMachine.plist"
@@ -33,6 +34,7 @@ type Config struct {
 	ScanRoots        []string
 	StateDir         string
 	ProgressInterval time.Duration
+	ScanEvery        time.Duration
 	InventoryEvery   time.Duration
 	TMPlist          string
 	OTel             OTelConfig
@@ -56,6 +58,7 @@ type fileConfig struct {
 	ScanRoots        []string      `toml:"scan_roots"`
 	StateDir         string        `toml:"state_dir"`
 	ProgressInterval string        `toml:"progress_interval"`
+	ScanEvery        string        `toml:"scan_every"`
 	InventoryEvery   string        `toml:"inventory_every"`
 	TMPlist          string        `toml:"tm_plist"`
 	OTel             fileOTel      `toml:"otel"`
@@ -81,6 +84,7 @@ func Default() Config {
 		ScanRoots:        []string{filepath.Join(home, "src")},
 		StateDir:         filepath.Join(XDGStateHome(), appDir),
 		ProgressInterval: DefaultProgressEvery,
+		ScanEvery:        DefaultScanEvery,
 		InventoryEvery:   DefaultInventoryEvery,
 		TMPlist:          DefaultTMPlist,
 		OTel: OTelConfig{
@@ -179,6 +183,12 @@ func parse(cfg Config, data []byte) (Config, error) {
 		cfg.ProgressInterval, err = time.ParseDuration(fc.ProgressInterval)
 		if err != nil {
 			return Config{}, fmt.Errorf("parse progress_interval: %w", err)
+		}
+	}
+	if fc.ScanEvery != "" {
+		cfg.ScanEvery, err = time.ParseDuration(fc.ScanEvery)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse scan_every: %w", err)
 		}
 	}
 	if fc.InventoryEvery != "" {

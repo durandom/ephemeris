@@ -31,7 +31,11 @@ not written to disk.
 ## Behaviour
 
 - Refresh exclusions first, even when the disk is unplugged. A failing
-  `mac-exclude` step does not stop the next one.
+  `mac-exclude` step does not stop the next one. `apply-catalog` runs every
+  time; scans run every `scan_every` (Go duration string, default `"12h"`).
+  Only a successful scan of all roots updates `state_dir/last_scan`; skipped
+  scans are recorded in `cycle.log` and telemetry. As with `inventory_every`,
+  a nonpositive interval disables the scheduled scan.
 - Disk absent → outcome `skipped_no_disk`, exit 0.
 - `tmutil status` reports `Running=true` → outcome `already_running`. Never
   start a second backup, never stop the one that is running.
@@ -61,6 +65,7 @@ because OpenObserve turns dotted names into underscores at ingest.
 | Record           | Attributes |
 |------------------|------------|
 | `ephemeris.run`  | `host`, `outcome`, `rc`, `duration_s`, `bytes_copied`, `destination` |
+| `ephemeris.scan` | `host`, `skipped`, `rc`, `duration_s` |
 | `ephemeris.inventory` | `host`, `area`, `files`, `bytes`, `eperm` |
 | `ephemeris.progress` | `host`, `phase`, `files`, `total_files`, `bytes`, `percent`, `raw_percent`, `time_remaining_s`, `destination` |
 

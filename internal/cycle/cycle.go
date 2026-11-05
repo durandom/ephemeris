@@ -22,6 +22,7 @@ const (
 	OutcomeSkippedNoDisk  = "skipped_no_disk"
 	OutcomeAlreadyRunning = "already_running"
 	lastInventoryFile     = "last_inventory"
+	lastScanFile          = "last_scan"
 
 	// MaxCycleLogBytes bounds each retained cycle log. Rotation keeps one
 	// previous file, so telemetry failures cannot grow local logs forever.
@@ -165,14 +166,28 @@ func runExclusions(ctx context.Context, cfg config.Config, deps Deps) {
 	end(rc)
 
 	ctx, end = startPhase(ctx, deps, "scan")
+	started := now(deps)
+	skipped := !timestampDue(cfg.StateDir, lastScanFile, cfg.ScanEvery, now(deps))
 	rc = 0
+	defer func() {
+		end(rc)
+		deps.Telemetry.EmitScan(ctx, hostname(deps), skipped, rc, now(deps).Sub(started))
+	}()
+	if skipped {
+		logf(deps, "scan skipped=true (scan_every=%s)", cfg.ScanEvery)
+		return
+	}
 	for _, root := range cfg.ScanRoots {
 		if err := callExclude(deps, "tm", "scan", root); err != nil {
 			logf(deps, "scan %s: %v", root, err)
 			rc = 1
 		}
 	}
-	end(rc)
+	if rc == 0 {
+		if err := writeStamp(cfg.StateDir, lastScanFile, now(deps)); err != nil {
+			logf(deps, "scan stamp: %v", err)
+		}
+	}
 }
 
 func runInventory(ctx context.Context, cfg config.Config, deps Deps) {
@@ -256,10 +271,14 @@ func DefaultInventory(cfg config.Config) InventoryFunc {
 }
 
 func inventoryDue(cfg config.Config, deps Deps) bool {
-	if cfg.InventoryEvery <= 0 {
+	return timestampDue(cfg.StateDir, lastInventoryFile, cfg.InventoryEvery, now(deps))
+}
+
+func timestampDue(stateDir, name string, every time.Duration, at time.Time) bool {
+	if every <= 0 {
 		return false
 	}
-	b, err := os.ReadFile(filepath.Join(cfg.StateDir, lastInventoryFile))
+	b, err := os.ReadFile(filepath.Join(stateDir, name))
 	if err != nil {
 		return true
 	}
@@ -267,17 +286,21 @@ func inventoryDue(cfg config.Config, deps Deps) bool {
 	if err != nil {
 		return true
 	}
-	return now(deps).Sub(t) >= cfg.InventoryEvery
+	return at.Sub(t) >= every
 }
 
 func WriteInventoryStamp(stateDir string, at time.Time) error {
+	return writeStamp(stateDir, lastInventoryFile, at)
+}
+
+func writeStamp(stateDir, name string, at time.Time) error {
 	if stateDir == "" {
 		return nil
 	}
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(stateDir, lastInventoryFile), []byte(at.UTC().Format(time.RFC3339)+"\n"), 0o600)
+	return os.WriteFile(filepath.Join(stateDir, name), []byte(at.UTC().Format(time.RFC3339)+"\n"), 0o600)
 }
 
 func startPhase(ctx context.Context, deps Deps, name string) (context.Context, func(rc int)) {

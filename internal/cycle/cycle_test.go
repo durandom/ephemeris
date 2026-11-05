@@ -84,6 +84,7 @@ func testCfg(t *testing.T) config.Config {
 		DestinationName:  "tm2",
 		StateDir:         t.TempDir(),
 		ScanRoots:        []string{"/tmp/src"},
+		ScanEvery:        config.DefaultScanEvery,
 		ProgressInterval: 0,
 		InventoryEvery:   0,
 	}
@@ -289,5 +290,96 @@ func TestProgressPollsDuringBackup(t *testing.T) {
 	host.mu.Unlock()
 	if n < 2 {
 		t.Fatalf("statuses = %d, want progress polls", n)
+	}
+}
+
+func TestScanSchedule(t *testing.T) {
+	at := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name     string
+		stamp    string
+		fail     bool
+		wantScan bool
+	}{
+		{name: "first run", wantScan: true},
+		{name: "recent", stamp: at.Add(-time.Hour).Format(time.RFC3339)},
+		{name: "old", stamp: at.Add(-13 * time.Hour).Format(time.RFC3339), wantScan: true},
+		{name: "interval boundary", stamp: at.Add(-12 * time.Hour).Format(time.RFC3339), wantScan: true},
+		{name: "invalid stamp", stamp: "invalid", wantScan: true},
+		{name: "failed first scan", fail: true, wantScan: true},
+		{name: "failed old scan", stamp: at.Add(-13 * time.Hour).Format(time.RFC3339), fail: true, wantScan: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testCfg(t)
+			cfg.ScanRoots = []string{"/tmp/first", "/tmp/second"}
+			path := filepath.Join(cfg.StateDir, lastScanFile)
+			if tc.stamp != "" {
+				if err := os.WriteFile(path, []byte(tc.stamp+"\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			catalogs, scans := 0, 0
+			var logs []string
+			host := &fakeHost{present: true, mounted: true}
+			res := Run(context.Background(), cfg, Deps{
+				Host: host,
+				Now:  func() time.Time { return at },
+				Log:  func(msg string) { logs = append(logs, msg) },
+				Exclude: func(args ...string) error {
+					if args[1] == "apply-catalog" {
+						catalogs++
+						return nil
+					}
+					scans++
+					if tc.fail && args[2] == cfg.ScanRoots[0] {
+						return errors.New("scan failed")
+					}
+					return nil
+				},
+			})
+			wantScans := 0
+			if tc.wantScan {
+				wantScans = len(cfg.ScanRoots)
+			}
+			if catalogs != 1 || scans != wantScans {
+				t.Fatalf("catalogs=%d scans=%d, want 1 and %d", catalogs, scans, wantScans)
+			}
+			if res.Outcome != OutcomeSuccess || host.backups != 1 {
+				t.Fatalf("scan affected backup: result=%+v backups=%d", res, host.backups)
+			}
+			if !tc.wantScan && !strings.Contains(strings.Join(logs, "\n"), "scan skipped=true") {
+				t.Fatal("missing scan skip log")
+			}
+			stamp, err := os.ReadFile(path)
+			if tc.fail && tc.stamp == "" {
+				if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("failed first scan wrote stamp: %q, %v", stamp, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantStamp := tc.stamp
+			if tc.wantScan && !tc.fail {
+				wantStamp = at.Format(time.RFC3339)
+			}
+			if string(stamp) != wantStamp+"\n" {
+				t.Fatalf("stamp=%q want %q", stamp, wantStamp+"\n")
+			}
+		})
+	}
+}
+
+func TestScanStampWriteFailureDoesNotStopBackup(t *testing.T) {
+	cfg := testCfg(t)
+	cfg.StateDir = filepath.Join(cfg.StateDir, "file")
+	if err := os.WriteFile(cfg.StateDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	host := &fakeHost{present: true, mounted: true}
+	res := Run(context.Background(), cfg, Deps{Host: host})
+	if res.Outcome != OutcomeSuccess || host.backups != 1 {
+		t.Fatalf("result=%+v backups=%d", res, host.backups)
 	}
 }

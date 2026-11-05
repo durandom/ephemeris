@@ -3,8 +3,10 @@ package telemetry
 import (
 	"context"
 	"errors"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/durandom/ephemeris/internal/inventory"
 	"github.com/durandom/ephemeris/internal/timemachine"
@@ -16,6 +18,7 @@ func TestNilSafe(t *testing.T) {
 	var tel *T
 	ctx, end := tel.StartPhase(context.Background(), "backup")
 	end(0)
+	tel.EmitScan(ctx, "proteus", true, 0, time.Second)
 	tel.EmitRun(ctx, RunRecord{Outcome: "success"})
 	tel.EmitInventory(ctx, "host", inventory.Area{Path: "/tmp"})
 	tel.EmitProgress(ctx, "host", timemachine.Status{Running: true})
@@ -112,4 +115,52 @@ func TestDisabledSetup(t *testing.T) {
 	end(1)
 	tel.EmitRun(ctx, RunRecord{Outcome: "failed", RC: 2})
 	tel.Shutdown()
+}
+
+type scanCapture struct {
+	records []sdklog.Record
+}
+
+func (c *scanCapture) OnEmit(_ context.Context, r *sdklog.Record) error {
+	c.records = append(c.records, r.Clone())
+	return nil
+}
+func (*scanCapture) Enabled(context.Context, sdklog.EnabledParameters) bool { return true }
+func (*scanCapture) Shutdown(context.Context) error                         { return nil }
+func (*scanCapture) ForceFlush(context.Context) error                       { return nil }
+
+func TestEmitScanDistinguishesSkipFromFailure(t *testing.T) {
+	capture := &scanCapture{}
+	provider := sdklog.NewLoggerProvider(sdklog.WithProcessor(capture))
+	defer provider.Shutdown(context.Background())
+	tel := &T{logger: provider.Logger("test")}
+	tel.EmitScan(context.Background(), "alice@example.test", true, 0, time.Second)
+	tel.EmitScan(context.Background(), "proteus", false, 1, 2*time.Second)
+	if len(capture.records) != 2 {
+		t.Fatalf("records=%d", len(capture.records))
+	}
+	for i, r := range capture.records {
+		if r.EventName() != "ephemeris.scan" {
+			t.Fatalf("event=%q", r.EventName())
+		}
+		attrs := map[string]otellog.Value{}
+		r.WalkAttributes(func(kv otellog.KeyValue) bool { attrs[kv.Key] = kv.Value; return true })
+		if attrs["skipped"].AsBool() != (i == 0) || attrs["rc"].AsInt64() != int64(i) || attrs["duration_s"].AsFloat64() != float64(i+1) {
+			t.Fatalf("attrs=%v", attrs)
+		}
+		wantHost := "unknown"
+		if i == 1 {
+			wantHost = "proteus"
+		}
+		if attrs["host"].AsString() != wantHost {
+			t.Fatalf("host=%v", attrs["host"])
+		}
+		wantSeverity := otellog.SeverityInfo
+		if i == 1 {
+			wantSeverity = otellog.SeverityError
+		}
+		if r.Severity() != wantSeverity {
+			t.Fatalf("severity=%v", r.Severity())
+		}
+	}
 }

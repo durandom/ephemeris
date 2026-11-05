@@ -139,6 +139,28 @@ func (t *T) EmitRun(ctx context.Context, rec RunRecord) {
 	t.logger.Emit(ctx, r)
 }
 
+// EmitScan reports scan skips separately from failures in the logs-only pipeline.
+func (t *T) EmitScan(ctx context.Context, host string, skipped bool, rc int, duration time.Duration) {
+	if t == nil || t.logger == nil {
+		return
+	}
+	var r otellog.Record
+	r.SetEventName("ephemeris.scan")
+	r.SetBody(otellog.StringValue("ephemeris.scan"))
+	r.SetTimestamp(time.Now())
+	r.SetSeverity(otellog.SeverityInfo)
+	if rc != 0 {
+		r.SetSeverity(otellog.SeverityError)
+	}
+	r.AddAttributes(
+		otellog.String("host", controlledHost(host)),
+		otellog.Bool("skipped", skipped),
+		otellog.Int("rc", rc),
+		otellog.Float64("duration_s", duration.Seconds()),
+	)
+	t.logger.Emit(ctx, r)
+}
+
 func (t *T) EmitInventory(ctx context.Context, host string, area inventory.Area) {
 	if t == nil || t.logger == nil {
 		return
